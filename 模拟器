@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>残疾人就业博弈模拟器 V4.0 (城市对比版)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'PingFang SC', sans-serif; background-color: #f0f4f8; padding: 20px; }
+        .container { max-width: 1100px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.15); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #3498db; padding-bottom: 15px; margin-bottom: 20px; }
+        .city-presets { display: flex; gap: 10px; }
+        .city-btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .bj-btn { background: #e74c3c; color: white; }
+        .sz-btn { background: #2ecc71; color: white; }
+        .city-btn:hover { opacity: 0.8; transform: translateY(-2px); }
+        
+        .main-layout { display: grid; grid-template-columns: 380px 1fr; gap: 25px; }
+        .control-panel { background: #fdfdfe; padding: 18px; border: 1px solid #d1d9e6; border-radius: 8px; }
+        .group-title { font-size: 13px; color: #7f8c8d; margin-bottom: 12px; border-left: 4px solid #3498db; padding-left: 8px; }
+        .control-group { margin-bottom: 18px; }
+        label { display: block; font-size: 12px; font-weight: bold; color: #2c3e50; margin-bottom: 5px; }
+        input[type="range"] { width: 100%; cursor: pointer; }
+        .val-tag { float: right; color: #3498db; font-family: monospace; }
+        
+        .result-panel { display: flex; flex-direction: column; gap: 15px; }
+        .status-box { padding: 15px; border-radius: 6px; text-align: center; font-weight: bold; font-size: 16px; box-shadow: inset 0 0 5px rgba(0,0,0,0.05); }
+        .chart-box { height: 350px; background: #fff; padding: 10px; border: 1px solid #eee; border-radius: 8px; }
+        
+        .safe { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+        .warning { background: #fff3e0; color: #ef6c00; border: 1px solid #ffe0b2; }
+        .danger { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+        .source-note { font-size: 11px; color: #95a5a6; margin-top: 10px; line-height: 1.4; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2 style="margin:0; color:#1a3a5a;">残疾人就业博弈模拟器 <small style="font-size:12px; font-weight:normal;">实证分析演示版</small></h2>
+        <div class="city-presets">
+            <span style="font-size:12px; align-self:center;">快速加载场景：</span>
+            <button class="city-btn bj-btn" onclick="applyPreset('BJ')">北京场景</button>
+            <button class="city-btn sz-btn" onclick="applyPreset('SZ')">深圳场景</button>
+        </div>
+    </div>
+    
+    <div class="main-layout">
+        <div class="control-panel">
+            <div class="group-title">政策环境变量 (基于地区差异)</div>
+            <div class="control-group">
+                <label>残保金征收额 (每人/年) <span class="val-tag" id="levy-val">50,000</span></label>
+                <input type="range" id="levy" min="10000" max="120000" step="1000" value="50000">
+            </div>
+            <div class="control-group">
+                <label>政府监管刚性 (核查概率) <span class="val-tag" id="audit-val">10%</span></label>
+                <input type="range" id="audit" min="0" max="100" step="1" value="10">
+            </div>
+
+            <div class="group-title">企业内部障碍 (基于多维阻碍图)</div>
+            <div class="control-group">
+                <label>真招固定支出 (工资+社保) <span class="val-tag" id="fixed-val">40,000</span></label>
+                <input type="range" id="fixed" min="20000" max="80000" step="1000" value="40000">
+            </div>
+            <div class="control-group">
+                <label>隐形管理成本 (环境+沟通+偏见) <span class="val-tag" id="manage-val">20,000</span></label>
+                <input type="range" id="manage" min="0" max="50000" step="1000" value="20000">
+            </div>
+            
+            <div class="source-note">
+                * <b>计算公式：</b><br>
+                1. 真实雇佣 = 固定支出 + 管理成本<br>
+                2. 非法挂靠 = 灰市价格(1.5万) + 风险期望罚金<br>
+                3. 直接缴费 = 征收额度
+            </div>
+        </div>
+
+        <div class="result-panel">
+            <div id="status-tag" class="status-box">正在分析博弈均衡状态...</div>
+            <div class="chart-box">
+                <canvas id="costChart"></canvas>
+            </div>
+            <div style="font-size: 13px; background: #ebf2f9; padding: 12px; border-radius: 6px;">
+                <strong>💡 决策诊断：</strong> <span id="insight-text"></span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const ctx = document.getElementById('costChart').getContext('2d');
+    let chart;
+
+    // 预设城市参数
+    function applyPreset(city) {
+        if (city === 'BJ') {
+            document.getElementById('levy').value = 80000;  // 北京征收额高
+            document.getElementById('fixed').value = 60000; // 北京工资水平高
+            document.getElementById('audit').value = 8;    // 监管相对滞后于市场
+            document.getElementById('manage').value = 25000; // 管理门槛
+        } else if (city === 'SZ') {
+            document.getElementById('levy').value = 45000;  // 阶梯减免
+            document.getElementById('fixed').value = 50000; 
+            document.getElementById('audit').value = 25;    // 数字化监管较强
+            document.getElementById('manage').value = 10000; // 模拟补贴政策
+        }
+        refresh();
+    }
+
+    function refresh() {
+        const levy = parseInt(document.getElementById('levy').value);
+        const audit = parseInt(document.getElementById('audit').value) / 100;
+        const fixed = parseInt(document.getElementById('fixed').value);
+        const manage = parseInt(document.getElementById('manage').value);
+        
+        document.getElementById('levy-val').innerText = levy.toLocaleString();
+        document.getElementById('audit-val').innerText = (audit * 100).toFixed(0) + '%';
+        document.getElementById('fixed-val').innerText = fixed.toLocaleString();
+        document.getElementById('manage-val').innerText = manage.toLocaleString();
+
+        const costReal = fixed + manage;
+        const costPay = levy;
+        const costShadow = 15000 + (audit * (levy * 3)); // 罚金按3倍计算
+
+        const dataPoints = [costReal, costShadow, costPay];
+        const minCost = Math.min(...dataPoints);
+
+        const statusTag = document.getElementById('status-tag');
+        const insightText = document.getElementById('insight-text');
+
+        if (minCost === costShadow) {
+            statusTag.innerText = "🚨 均衡状态：系统性“挂靠”风险";
+            statusTag.className = "status-box danger";
+            insightText.innerText = "当前成本结构下，企业选择‘挂靠’能节省大量开支且被查风险极低。单纯提高征收额只会让挂靠利润空间更大。";
+        } else if (minCost === costPay) {
+            statusTag.innerText = "💼 均衡状态：企业选择“赎买不雇佣权”";
+            statusTag.className = "status-box warning";
+            insightText.innerText = "真招成本（含管理偏见）超过了直接交钱。此时残保金变成了企业的税收负担而非安置动力。";
+        } else {
+            statusTag.innerText = "✅ 均衡状态：达成“真实融合就业”";
+            statusTag.className = "status-box safe";
+            insightText.innerText = "政策组合拳生效！通过降低管理门槛、适度监管和合理的征收标准，真实雇佣成为了企业理性的最优选择。";
+        }
+
+        if (chart) chart.destroy();
+        chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['真实雇佣', '非法挂靠', '全额缴费'],
+                datasets: [{
+                    data: dataPoints,
+                    backgroundColor: ['#2ecc71', '#e74c3c', '#3498db'],
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { x: { beginAtZero: true, title: { display: true, text: '年度单位成本 (元)' } } }
+            }
+        });
+    }
+
+    document.querySelectorAll('input').forEach(i => i.addEventListener('input', refresh));
+    refresh();
+</script>
+</body>
+</html>
