@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>残疾人就业政策博弈模拟器 V2.0</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', 'PingFang SC', sans-serif; background-color: #f0f2f5; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #1a3a5a; border-bottom: 2px solid #3498db; padding-bottom: 15px; }
+        .grid-layout { display: grid; grid-template-columns: 350px 1fr; gap: 30px; margin-top: 20px; }
+        .control-panel { background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; }
+        .control-group { margin-bottom: 20px; }
+        label { display: block; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 8px; }
+        .hint { font-size: 11px; color: #94a3b8; font-weight: normal; margin-top: 4px; }
+        input[type="range"] { width: 100%; height: 6px; border-radius: 5px; background: #cbd5e1; outline: none; transition: 0.3s; }
+        .val-tag { float: right; color: #3498db; font-family: monospace; font-size: 14px; }
+        .analysis-card { background: #fff; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; flex-direction: column; }
+        .chart-box { flex-grow: 1; min-height: 300px; margin-bottom: 20px; }
+        .status-bar { padding: 15px; border-radius: 6px; text-align: center; font-weight: bold; font-size: 16px; transition: 0.5s; }
+        .safe { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .warning { background: #fef9c3; color: #854d0e; border: 1px solid #fef08a; }
+        .danger { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .source-note { margin-top: 15px; font-size: 12px; color: #64748b; line-height: 1.5; background: #f1f5f9; padding: 10px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>残疾人就业政策博弈模拟器 <small style="font-size: 14px; color: #64748b;">(学术研究演示版)</small></h2>
+    
+    <div class="grid-layout">
+        <div class="control-panel">
+            <div class="control-group">
+                <label>政策强度 (残保金征收额) <span class="val-tag" id="levy-val">50,000</span></label>
+                <input type="range" id="levy" min="0" max="100000" step="1000" value="50000">
+                <div class="hint">未安置残疾人需缴纳的保障金数额</div>
+            </div>
+
+            <div class="control-group">
+                <label>监管概率 (被查获几率) <span class="val-tag" id="audit-val">10%</span></label>
+                <input type="range" id="audit" min="0" max="100" step="1" value="10">
+                <div class="hint">政府核查“挂靠”行为的行政力度</div>
+            </div>
+
+            <div class="control-group">
+                <label>管理成本 (企业安置门槛) <span class="val-tag" id="manage-val">20,000</span></label>
+                <input type="range" id="manage" min="0" max="50000" step="1000" value="20000">
+                <div class="hint">岗位改造、无障碍设施、生产率损失等</div>
+            </div>
+
+            <div class="source-note">
+                <strong>数据模型依据：</strong><br>
+                • <b>固定工资社保：</b>40,000元/年 (参考城镇最低标准)<br>
+                • <b>灰色挂靠费：</b>15,000元/年 (参考黑市证件租用价)<br>
+                • <b>违法成本：</b>被查获需补齐差额并处2倍罚金
+            </div>
+        </div>
+
+        <div class="analysis-card">
+            <div id="status-tag" class="status-bar">正在计算博弈结果...</div>
+            <div class="chart-box">
+                <canvas id="costChart"></canvas>
+            </div>
+            <div style="font-size: 14px; color: #475569;">
+                <strong>核心发现：</strong>
+                <p id="insight-text">当挂靠成本显著低于真实雇佣时，企业将倾向于“合规性造假”。</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const ctx = document.getElementById('costChart').getContext('2d');
+    let chart;
+
+    function refresh() {
+        const levy = parseInt(document.getElementById('levy').value);
+        const audit = parseInt(document.getElementById('audit').value) / 100;
+        const manage = parseInt(document.getElementById('manage').value);
+        
+        document.getElementById('levy-val').innerText = levy.toLocaleString();
+        document.getElementById('audit-val').innerText = (audit * 100).toFixed(0) + '%';
+        document.getElementById('manage-val').innerText = manage.toLocaleString();
+
+        const salaryFixed = 40000;
+        const shadowFixed = 15000; 
+
+        // 核心成本算法
+        const costReal = salaryFixed + manage; 
+        const costPay = levy;
+        // 挂靠期望成本 = 基础费 + 风险几率 * (补齐差额 + 罚款)
+        const costShadow = shadowFixed + (audit * (levy + levy * 2)); 
+
+        const dataPoints = [costReal, costShadow, costPay];
+        const minCost = Math.min(...dataPoints);
+
+        const statusTag = document.getElementById('status-tag');
+        const insightText = document.getElementById('insight-text');
+
+        if (minCost === costShadow) {
+            statusTag.innerText = "🚨 决策预测：企业倾向【非法挂靠】";
+            statusTag.className = "status-bar danger";
+            insightText.innerHTML = "<b>原因：</b>低监管风险下，挂靠的经济收益远超守法激励。建议加强现场核查。";
+        } else if (minCost === costPay) {
+            statusTag.innerText = "💰 决策预测：企业倾向【直接缴费】";
+            statusTag.className = "status-bar warning";
+            insightText.innerHTML = "<b>原因：</b>安置残疾人的管理成本过高，企业宁愿支付‘不雇佣金’。建议增加安置补贴。";
+        } else {
+            statusTag.innerText = "✅ 决策预测：企业倾向【真实雇佣】";
+            statusTag.className = "status-bar safe";
+            insightText.innerHTML = "<b>原因：</b>政策组合拳生效，真招成本具有竞争优势。这是理想的社会融合状态。";
+        }
+
+        if (chart) chart.destroy();
+        chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['真实雇佣 (有效政策)', '非法挂靠 (政策失效)', '全额缴费 (中性策略)'],
+                datasets: [{
+                    data: dataPoints,
+                    backgroundColor: ['#2ecc71', '#e74c3c', '#3498db'],
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { x: { beginAtZero: true, title: { display: true, text: '年度单位成本 (元)' } } }
+            }
+        });
+    }
+
+    document.querySelectorAll('input').forEach(i => i.addEventListener('input', refresh));
+    refresh();
+</script>
+</body>
+</html>
